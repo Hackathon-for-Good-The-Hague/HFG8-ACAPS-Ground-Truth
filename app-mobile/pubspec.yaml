@@ -1,0 +1,21 @@
+name: ground_truth
+description: Ground Truth - a trusted expert loop for ACAPS risk analysis (Hackathon for Good #8 prototype).
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/risk-radar-export.csv
