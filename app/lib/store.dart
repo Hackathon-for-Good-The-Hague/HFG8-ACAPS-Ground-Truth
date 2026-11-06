@@ -14,6 +14,21 @@ export 'identity.dart';
 /// Demo invite codes, as printed on the QR codes ACAPS hands out.
 const inviteCodes = {'GT-CHAD-7Q4X': 'Chad', 'GT-SDN-3K9M': 'Sudan'};
 
+/// Invite code for a country panel: the printed demo code if there is one,
+/// otherwise a stable generated one (same country, same code).
+String inviteCodeFor(String country) {
+  final printed = inviteCodes.entries.where((e) => e.value == country).firstOrNull?.key;
+  if (printed != null) return printed;
+  final letters = country.toUpperCase().replaceAll(RegExp('[^A-Z]'), '');
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var h = 7;
+  for (final u in country.codeUnits) {
+    h = (h * 31 + u) & 0x7fffffff;
+  }
+  final tail = List.generate(4, (i) => alphabet[(h >> (i * 5)) % alphabet.length]).join();
+  return 'GT-${letters.substring(0, min(4, letters.length))}-$tail';
+}
+
 /// Likelihood 1..5 -> probability used for Brier scoring.
 const likelihoodProbs = [0.1, 0.3, 0.5, 0.7, 0.9];
 
@@ -247,7 +262,8 @@ class AppState extends ChangeNotifier {
 
   /// Returns the panel country, or null if the code is not a valid invite.
   String? redeemInvite(String code) {
-    final panel = inviteCodes[code.trim().toUpperCase()];
+    final c = code.trim().toUpperCase();
+    final panel = inviteCodes[c] ?? countries.where((x) => inviteCodeFor(x) == c).firstOrNull;
     if (panel != null) {
       invitePanel = panel;
       _changed();
@@ -312,6 +328,7 @@ class AppState extends ChangeNotifier {
     invitePanel = null;
     sessionExpertId = null;
     sessionModerator = false;
+    risks.removeWhere((r) => r.custom);
     _seed();
     _statsCache.clear();
     notifyListeners();
@@ -397,7 +414,7 @@ class AppState extends ChangeNotifier {
     return out;
   }
 
-  void submit(Risk r, Map<String, ItemAnswer> items) {
+  void submit(Risk r, Map<String, ItemAnswer> items, {Credit? credit}) {
     final e = me;
     if (e == null) return;
     final key = '${e.id}|${r.id}';
@@ -409,6 +426,7 @@ class AppState extends ChangeNotifier {
       items: Map.of(items),
       answeredAt: prev?.answeredAt ?? now,
       editedAt: prev == null ? null : now,
+      credit: credit ?? prev?.credit,
     );
     // "What is ACAPS missing?" answers become comments for the group.
     for (final entry in items.entries) {
@@ -439,6 +457,7 @@ class AppState extends ChangeNotifier {
   /// answers on active risks, so whoever demos them can take the survey.
   Response? _simulated(Expert e, Risk r) {
     if (!e.simulated || !relevantTo(e, r)) return null;
+    if (r.custom) return null; // a brand-new risk has no answers yet
     if (e.persona && r.isActive) return null;
     if (r.id != 'R1043' && Random(stableHash('${e.id}|${r.id}')).nextDouble() > e.participation) return null;
 
@@ -629,6 +648,118 @@ class AppState extends ChangeNotifier {
     return out;
   }
 
+  // =========================================================================
+  // Risks created by the moderator
+  // =========================================================================
+
+  /// Next free id after the highest "R<number>" in use.
+  String nextRiskId() {
+    final n = risks.map((r) => int.tryParse(r.id.replaceAll(RegExp('[^0-9]'), '')) ?? 0).fold(0, max);
+    return 'R${n + 1}';
+  }
+
+  /// Adds a new risk, or replaces the one with the same id.
+  void saveRisk(Risk r) {
+    final i = risks.indexWhere((x) => x.id == r.id);
+    if (i >= 0) {
+      risks[i] = r;
+    } else {
+      risks.add(r);
+    }
+    _changed();
+  }
+
+  /// Only risks created in the app can be deleted; Risk Radar risks stay.
+  void deleteRisk(Risk r) {
+    if (!r.custom) return;
+    risks.removeWhere((x) => x.id == r.id);
+    comments.removeWhere((c) => c.riskId == r.id);
+    _responses.removeWhere((_, v) => v.riskId == r.id);
+    for (final s in _skipped.values) {
+      s.remove(r.id);
+    }
+    _changed();
+  }
+
+  // =========================================================================
+  // Public view: aggregates only, safe to publish
+  // =========================================================================
+
+  /// Contributors who agreed to be named for this risk (their choice in the
+  /// survey, or their profile default), sorted by name.
+  List<({String name, Credit as})> creditsFor(Risk r) => [
+        for (final e in respondents(r))
+          if (publicCredit(e, responseOf(e, r)?.credit) case final c?) c,
+      ]..sort((a, b) => a.name.compareTo(b.name));
+
+  /// What the public may see for one risk: aggregates only, no comments, no
+  /// respondent countries; no results at all below [minPanel] respondents.
+  /// With [credits], experts who agreed are listed as contributors (never
+  /// next to an answer).
+  Map<String, dynamic> publicView(Risk r, {bool credits = false}) {
+    final n = respondents(r).length;
+    List<int> dist(Iterable<int> xs) {
+      final c = List.filled(5, 0);
+      for (final x in xs) {
+        c[x - 1]++;
+      }
+      return c;
+    }
+
+    double? mean(List<int> xs) => xs.isEmpty ? null : double.parse((xs.reduce((a, b) => a + b) / xs.length).toStringAsFixed(2));
+    return {
+      'risk_id': r.id,
+      'title': r.title,
+      'countries': riskCountries(r),
+      'status': r.status,
+      'acaps': {
+        'probability': r.probabilityIdx == null ? null : levelLabels[r.probabilityIdx!],
+        'likelihood_1_5': r.acapsLikelihood,
+        'impact_1_5': r.impact,
+        'risk_level': r.level.isEmpty ? null : r.level,
+      },
+      'respondents': n,
+      'published': n >= minPanel,
+      if (n >= minPanel)
+        'questions': [
+          for (final it in r.surveyItems)
+            () {
+              final a = answersFor(r, it.id);
+              final l = [for (final x in a) x.likelihood], s = [for (final x in a) x.severity];
+              return {
+                'id': it.id,
+                'title': it.title,
+                'answers': a.length,
+                'agreement_with_acaps': {for (final g in Agreement.values) g.name: a.where((x) => x.agree == g).length},
+                'likelihood': {'distribution_1_5': dist(l), 'mean': mean(l)},
+                'severity': {'distribution_1_5': dist(s), 'mean': mean(s)},
+              };
+            }(),
+        ],
+      if (n >= minPanel && credits) ...() {
+        final cs = creditsFor(r);
+        return {
+          'contributors': [
+            for (final c in cs) {'name': c.name, 'credited_as': c.as == Credit.realName ? 'real_name' : 'pseudonym'},
+          ],
+          'anonymous_contributors': n - cs.length,
+        };
+      }(),
+    };
+  }
+
+  /// A file ready to publish: one risk, or every risk with enough respondents.
+  String publicViewJson(Iterable<Risk> rs, {bool credits = false}) => const JsonEncoder.withIndent('  ').convert({
+        'schema': 'acaps-ground-truth/public-view/v1',
+        'generated_at': DateTime.now().toUtc().toIso8601String(),
+        'min_respondents': minPanel,
+        'risks': [for (final r in rs) publicView(r, credits: credits)],
+      });
+
+  /// Risks whose public view would show results.
+  List<Risk> get publishableRisks =>
+      risks.where((r) => (r.isActive || r.isResolved) && respondents(r).length >= minPanel).toList();
+
   /// Raw stored expert records, exactly as persisted (for the demo).
   String get rawExpertTable =>
       const JsonEncoder.withIndent('  ').convert([for (final e in experts) e.toJson()]);
@@ -725,6 +856,7 @@ class AppState extends ChangeNotifier {
         'experts': [for (final e in experts) e.toJson()],
         'responses': [for (final r in _responses.values) r.toJson()],
         'comments': [for (final c in comments) c.toJson()],
+        'custom_risks': [for (final r in risks.where((r) => r.custom)) r.toJson()],
         'skipped': {for (final e in _skipped.entries) e.key: e.value.toList()},
         'invite': invitePanel,
         'session': sessionExpertId,
@@ -754,6 +886,9 @@ class AppState extends ChangeNotifier {
       invitePanel = m['invite'] as String?;
       sessionExpertId = m['session'] as String?;
       sessionModerator = m['moderator'] == true;
+      risks
+        ..removeWhere((r) => r.custom)
+        ..addAll([for (final r in (m['custom_risks'] as List? ?? const [])) Risk.fromJson((r as Map).cast<String, dynamic>())]);
       return true;
     } catch (_) {
       return false; // corrupt or old state: start fresh

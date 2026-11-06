@@ -83,7 +83,11 @@ class Risk {
   final String materialisation;
   final List<Trigger> triggers;
 
+  /// Created by an ACAPS moderator in the app (not from the Risk Radar export).
+  final bool custom;
+
   const Risk({
+    this.custom = false,
     required this.id,
     required this.title,
     required this.type,
@@ -122,6 +126,46 @@ class Risk {
       triggers: parseTriggers(m['Triggers'] ?? ''),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'type': type,
+        'country': country,
+        'rationale': rationale,
+        'probability': probabilityIdx,
+        'impact': impact,
+        'level': level,
+        'trend': trend,
+        'status': status,
+        'exposure': exposure,
+        'needs': needs,
+        'materialisation': materialisation,
+        'triggers': [
+          for (final t in triggers) {'id': t.id, 'title': t.title, 'description': t.description},
+        ],
+      };
+
+  factory Risk.fromJson(Map<String, dynamic> m) => Risk(
+        custom: true,
+        id: m['id'] as String,
+        title: m['title'] as String,
+        type: (m['type'] as String?) ?? '',
+        country: m['country'] as String,
+        rationale: (m['rationale'] as String?) ?? '',
+        probabilityIdx: (m['probability'] as num?)?.toInt(),
+        impact: (m['impact'] as num?)?.toInt(),
+        level: (m['level'] as String?) ?? '',
+        trend: (m['trend'] as String?) ?? '',
+        status: (m['status'] as String?) ?? 'Active',
+        exposure: (m['exposure'] as String?) ?? '',
+        needs: (m['needs'] as String?) ?? '',
+        materialisation: (m['materialisation'] as String?) ?? '',
+        triggers: [
+          for (final t in (m['triggers'] as List? ?? const []))
+            Trigger(id: t['id'] as String, title: t['title'] as String, description: (t['description'] as String?) ?? ''),
+        ],
+      );
 
   bool get isActive => status.toLowerCase() == 'active';
   bool get materialised => status.toLowerCase() == 'materialised';
@@ -212,6 +256,18 @@ class ItemAnswer {
       );
 }
 
+/// How an expert wants to be credited when ACAPS publishes a risk they
+/// answered. Credits list contributors; they never sit next to an answer.
+enum Credit { realName, pseudonym, anonymous }
+
+extension CreditText on Credit {
+  String get label => switch (this) {
+        Credit.realName => 'Real name',
+        Credit.pseudonym => 'Pseudonym',
+        Credit.anonymous => 'Anonymous',
+      };
+}
+
 /// One expert's answers to one risk survey.
 class Response {
   final String expertId;
@@ -221,6 +277,9 @@ class Response {
   final DateTime? editedAt;
   final bool simulated;
 
+  /// Chosen for this risk; null = the default from the expert's profile.
+  final Credit? credit;
+
   const Response({
     required this.expertId,
     required this.riskId,
@@ -228,6 +287,7 @@ class Response {
     required this.answeredAt,
     this.editedAt,
     this.simulated = false,
+    this.credit,
   });
 
   Map<String, dynamic> toJson() => {
@@ -236,6 +296,7 @@ class Response {
         'items': {for (final e in items.entries) e.key: e.value.toJson()},
         'at': answeredAt.toIso8601String(),
         if (editedAt != null) 'edited': editedAt!.toIso8601String(),
+        if (credit != null) 'credit': credit!.name,
       };
 
   factory Response.fromJson(Map<String, dynamic> m) => Response(
@@ -247,6 +308,7 @@ class Response {
         },
         answeredAt: DateTime.parse(m['at'] as String),
         editedAt: m['edited'] == null ? null : DateTime.parse(m['edited'] as String),
+        credit: Credit.values.where((c) => c.name == m['credit']).firstOrNull,
       );
 }
 

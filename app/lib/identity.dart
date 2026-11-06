@@ -3,8 +3,11 @@
 /// Principle: individual contributions are never shown to the public.
 /// Every screen that shows an expert's name goes through [displayName];
 /// nothing else in the UI reads [Expert.realName] or [Expert.pseudonym]
-/// for display (the profile editor only edits your own fields).
+/// for display (the profile editor only edits your own fields). The one
+/// exception is [publicCredit]: names an expert chose to have published.
 library;
+
+import 'models.dart';
 
 enum Anonymity {
   /// Level 1: ACAPS knows your real name; colleagues see your pseudonym.
@@ -189,6 +192,29 @@ String displayName(Expert expert, Viewer viewer) {
       }
       return expert.pseudonym;
   }
+}
+
+/// Credit in a published report when the expert has not chosen for this
+/// risk: follows the profile level.
+Credit defaultCredit(Expert e) => switch (e.level) {
+      Anonymity.knownToAcaps => Credit.realName,
+      Anonymity.pseudonymous => Credit.pseudonym,
+      Anonymity.anonymous => Credit.anonymous,
+    };
+
+/// Real name is only possible while one is stored (not at level 3).
+bool creditAllowed(Expert e, Credit c) => c != Credit.realName || e.realName != null;
+
+/// The name to list among a published risk's contributors, or null to keep
+/// the expert out of the list. Only the expert's own choice (or their profile
+/// default) puts a name here; a real name deleted at level 3 is never used.
+({String name, Credit as})? publicCredit(Expert e, Credit? chosen) {
+  final c = chosen ?? defaultCredit(e);
+  return switch (c) {
+    Credit.realName => e.realName == null ? null : (name: e.realName!, as: Credit.realName),
+    Credit.pseudonym => (name: e.pseudonym, as: Credit.pseudonym),
+    Credit.anonymous => null,
+  };
 }
 
 /// Where a group of experts comes from, split into the risk's own

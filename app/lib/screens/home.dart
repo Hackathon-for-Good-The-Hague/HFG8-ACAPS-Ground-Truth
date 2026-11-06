@@ -20,20 +20,64 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     // Entering the app from a notification, or with a new/updated risk waiting:
-    // open that card straight away.
+    // a centred pop-up for that risk.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final r = appState.takeAutoOpen();
       if (r == null || !mounted) return;
-      final answered = appState.responseOf(appState.me!, r) != null;
-      Navigator.of(context).push(MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => SurveyScreen(
-          risk: r,
-          start: answered ? SurveyStart.summary : SurveyStart.intro,
-          fromNotification: true,
-        ),
-      ));
+      _showRiskPopup(r);
     });
+  }
+
+  Future<void> _showRiskPopup(Risk r) async {
+    final answered = appState.responseOf(appState.me!, r) != null;
+    final n = r.surveyItems.length;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final t = Theme.of(context).textTheme;
+        return AlertDialog(
+          icon: const Icon(Icons.notifications_active_outlined),
+          title: Text('ACAPS updated a risk in ${AppState.riskCountries(r).join(', ')}'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  RiskHeader(risk: r),
+                  const SizedBox(height: 14),
+                  Text(
+                    answered
+                        ? 'You already answered. See how colleagues see it now, or change your answer.'
+                        : 'Got 2 minutes? $n short ${n == 1 ? 'screen' : 'screens'}. '
+                            'You answer before you see the group, so your view stays independent.',
+                    style: t.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+            FilledButton(
+              // The theme makes filled buttons full width; dialog actions need a finite size.
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(answered ? 'See group summary' : 'Start'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted) return;
+    if (go == true) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SurveyScreen(risk: r, start: answered ? SurveyStart.summary : SurveyStart.questions),
+      ));
+    } else if (go == false && !answered && r.isActive) {
+      appState.skip(r); // explicit "Not now", same as on the survey intro
+    }
   }
 
   @override

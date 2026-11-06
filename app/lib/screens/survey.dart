@@ -44,6 +44,9 @@ class _SurveyScreenState extends State<SurveyScreen> {
   late int step; // 0 = intro, 1..n = items, n+1 = summary
   bool _details = false;
 
+  /// How to credit me if this risk is published; starts from my profile.
+  Credit? _credit;
+
   Risk get r => widget.risk;
   int get summaryStep => items.length + 1;
 
@@ -53,6 +56,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
     final me = appState.me;
     final existing = me == null ? null : appState.responseOf(me, r);
     drafts = {for (final it in items) it.id: _Draft(existing?.items[it.id])};
+    _credit = me == null ? null : (existing?.credit ?? defaultCredit(me));
     step = switch (widget.start) {
       _ when me == null => summaryStep,
       SurveyStart.intro => 0,
@@ -72,7 +76,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
   void _go(int s) {
     FocusScope.of(context).unfocus();
     if (s == summaryStep) {
-      appState.submit(r, {for (final e in drafts.entries) e.key: e.value.toAnswer()});
+      appState.submit(r, {for (final e in drafts.entries) e.key: e.value.toAnswer()}, credit: _credit);
     }
     setState(() => step = s);
   }
@@ -102,7 +106,16 @@ class _SurveyScreenState extends State<SurveyScreen> {
             child: step == 0
                 ? _intro(context)
                 : inItems
-                    ? _ItemPage(item: items[step - 1], index: step - 1, total: items.length, draft: drafts[items[step - 1].id]!, onChanged: () => setState(() {}))
+                    ? _ItemPage(
+                        item: items[step - 1],
+                        index: step - 1,
+                        total: items.length,
+                        draft: drafts[items[step - 1].id]!,
+                        onChanged: () => setState(() {}),
+                        footer: step == items.length && appState.me != null && _credit != null
+                            ? CreditPicker(expert: appState.me!, value: _credit!, onChanged: (c) => setState(() => _credit = c))
+                            : null,
+                      )
                     : _Summary(risk: r),
           ),
         ),
@@ -279,7 +292,10 @@ class _ItemPage extends StatefulWidget {
   final _Draft draft;
   final VoidCallback onChanged;
 
-  const _ItemPage({required this.item, required this.index, required this.total, required this.draft, required this.onChanged});
+  /// Shown under the questions (the credit choice on the last screen).
+  final Widget? footer;
+
+  const _ItemPage({required this.item, required this.index, required this.total, required this.draft, required this.onChanged, this.footer});
 
   @override
   State<_ItemPage> createState() => _ItemPageState();
@@ -398,7 +414,59 @@ class _ItemPageState extends State<_ItemPage> {
             ),
           ],
         ),
+        if (widget.footer != null) ...[const SizedBox(height: 24), widget.footer!],
       ],
+    );
+  }
+}
+
+/// "If ACAPS publishes this risk, list me as ..." Defaults to the profile.
+class CreditPicker extends StatelessWidget {
+  final Expert expert;
+  final Credit value;
+  final ValueChanged<Credit> onChanged;
+  const CreditPicker({super.key, required this.expert, required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final shown = publicCredit(expert, value);
+    final isDefault = value == defaultCredit(expert);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.badge_outlined, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text('If ACAPS publishes this risk, credit me as', style: t.titleSmall)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SegmentedButton<Credit>(
+              showSelectedIcon: false,
+              segments: [
+                for (final c in Credit.values)
+                  ButtonSegment(value: c, label: Text(c.label), enabled: creditAllowed(expert, c)),
+              ],
+              selected: {value},
+              onSelectionChanged: (v) => onChanged(v.first),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${shown == null ? 'Not listed. Your answers only count in the totals.' : 'Listed among contributors as "${shown.name}".'} '
+              'Names are never shown next to answers.'
+              '${isDefault ? ' This is the default from your profile.' : ''}'
+              '${expert.realName == null ? ' Real name is off: your profile is fully anonymous.' : ''}',
+              style: t.bodySmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -850,7 +918,8 @@ class Distribution extends StatelessWidget {
                     Text('$i', style: TextStyle(fontWeight: mine == i ? FontWeight.w800 : FontWeight.w500)),
                     if (mine == i)
                       const Text('you are here', textAlign: TextAlign.center, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800)),
-                    if (acaps == i) const Padding(padding: EdgeInsets.only(top: 2), child: Pill('ACAPS')),
+                    if (acaps == i)
+                      const Padding(padding: EdgeInsets.only(top: 2), child: FittedBox(fit: BoxFit.scaleDown, child: Pill('ACAPS'))),
                   ],
                 )),
             ],
