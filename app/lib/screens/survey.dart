@@ -7,6 +7,23 @@ import '../widgets.dart';
 
 enum SurveyStart { intro, questions, summary }
 
+/// "Not now" on a risk: skip it and say so clearly, with Undo. The risk stays
+/// in the Risks list (tagged "Skipped") and the banner hides for this session.
+void notNow(BuildContext context, Risk r) {
+  appState.skip(r);
+  final title = r.title.length > 90 ? '${r.title.substring(0, 90).trimRight()}…' : r.title;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      // A snack bar with an action stays until closed unless told otherwise.
+      persist: false,
+      duration: const Duration(seconds: 5),
+      content: Text('Skipped: "$title". It stays in your list, marked "Skipped", so you can answer later.'),
+      action: SnackBarAction(label: 'Undo', onPressed: () => appState.undoSkip(r)),
+    ));
+}
+
 class _Draft {
   Agreement? agree;
   int? likelihood;
@@ -58,7 +75,8 @@ class _SurveyScreenState extends State<SurveyScreen> {
     drafts = {for (final it in items) it.id: _Draft(existing?.items[it.id])};
     _credit = me == null ? null : (existing?.credit ?? defaultCredit(me));
     step = switch (widget.start) {
-      _ when me == null => summaryStep,
+      // Closed risks are read-only: straight to what happened and the group view.
+      _ when me == null || r.isResolved => summaryStep,
       SurveyStart.intro => 0,
       SurveyStart.questions => 1,
       SurveyStart.summary => existing == null ? 0 : summaryStep,
@@ -89,7 +107,11 @@ class _SurveyScreenState extends State<SurveyScreen> {
       builder: (context, _) => Scaffold(
         appBar: AppBar(
           title: Text(
-            step == 0 ? r.id : (inItems ? '${r.id} · ${items.length == 1 ? 'Question' : 'Trigger'} $step of ${items.length}' : 'Group summary'),
+            step == 0
+                ? r.id
+                : (inItems
+                    ? '${r.id} · ${items.length == 1 ? 'Question' : 'Trigger'} $step of ${items.length}'
+                    : (r.isResolved ? '${r.id} · What happened' : 'Group summary')),
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
           bottom: inItems
@@ -138,7 +160,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
             TextButton(
               style: TextButton.styleFrom(minimumSize: const Size(0, 52)),
               onPressed: () {
-                appState.skip(r);
+                notNow(context, r);
                 Navigator.of(context).pop();
               },
               child: const Text('Not now'),
@@ -206,14 +228,6 @@ class _SurveyScreenState extends State<SurveyScreen> {
           const SizedBox(height: 12),
         ],
         RiskHeader(risk: r),
-        if (r.isResolved) ...[
-          const SizedBox(height: 12),
-          const InfoBanner(
-            icon: Icons.history_edu,
-            text: 'Archive risk: it has already resolved. Answer as if ACAPS had just published it. '
-                'Your forecast matures straight away and you see what actually happened.',
-          ),
-        ],
         const SizedBox(height: 16),
         Text(
           '${items.length} short ${items.length == 1 ? 'screen' : 'screens'}, about 2 minutes. '
@@ -598,6 +612,16 @@ class _Summary extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 14),
+        if (risk.isResolved && mine == null) ...[
+          InfoBanner(
+            icon: Icons.lock_clock_outlined,
+            text: 'This risk has closed. You can see what happened and how the group saw it. '
+                'Answers are no longer accepted, so there are no points here.',
+          ),
+          const SizedBox(height: 12),
+          MaturedBlock(risk: risk),
+          const SizedBox(height: 12),
+        ],
         RespondentsCard(risk: risk, answered: answered, panelSize: panel.length),
         if (risk.isResolved && mine != null) ...[
           const SectionLabel('Your forecast matured'),
@@ -930,16 +954,17 @@ class Distribution extends StatelessWidget {
   }
 }
 
-/// Outcome of a matured forecast, styled like the risk card.
+/// Outcome of a closed risk, styled like the risk card. With [response], also
+/// the expert's score for the forecast they made while it was open.
 class MaturedBlock extends StatelessWidget {
   final Risk risk;
-  final Response response;
-  const MaturedBlock({super.key, required this.risk, required this.response});
+  final Response? response;
+  const MaturedBlock({super.key, required this.risk, this.response});
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final s = appState.scoreOf(response);
+    final s = response == null ? null : appState.scoreOf(response!);
     final happened = risk.materialised;
     final accent = happened ? AppColors.high : scaleColors[1];
     final text = risk.materialisation.length > 360 ? '${risk.materialisation.substring(0, 360).trimRight()}…' : risk.materialisation;
@@ -1031,7 +1056,10 @@ class CommentCard extends StatelessWidget {
     final me = appState.me;
     final isMine = me != null && c.authorId == me.id;
     final item = items.where((i) => i.id == c.itemId).firstOrNull;
-    final rc = appState.byId(c.riskId) == null ? <String>[] : AppState.riskCountries(appState.byId(c.riskId)!);
+    final risk = appState.byId(c.riskId);
+    final rc = risk == null ? <String>[] : AppState.riskCountries(risk);
+    // Closed risks are read-only, reactions included.
+    final canReact = me != null && !isMine && !(risk?.isResolved ?? false);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
@@ -1075,7 +1103,7 @@ class CommentCard extends StatelessWidget {
                     ids: c.agreeIds,
                     riskCountries: rc,
                     active: me != null && c.agreeIds.contains(me.id),
-                    onTap: me == null || isMine ? null : () => appState.react(c, true),
+                    onTap: canReact ? () => appState.react(c, true) : null,
                   ),
                   _ReactChip(
                     icon: Icons.thumb_down_alt_outlined,
@@ -1083,7 +1111,7 @@ class CommentCard extends StatelessWidget {
                     ids: c.disagreeIds,
                     riskCountries: rc,
                     active: me != null && c.disagreeIds.contains(me.id),
-                    onTap: me == null || isMine ? null : () => appState.react(c, false),
+                    onTap: canReact ? () => appState.react(c, false) : null,
                   ),
                 ],
               ),

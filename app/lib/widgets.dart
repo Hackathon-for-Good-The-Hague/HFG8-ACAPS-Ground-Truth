@@ -213,6 +213,7 @@ class RiskTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final me = appState.me;
     final done = me != null && appState.responseOf(me, risk) != null;
+    final skipped = !done && risk.isActive && appState.isSkipped(risk);
     final stripe = risk.isResolved ? cs.tertiary : levelColor(risk.level);
     final n = risk.surveyItems.length;
 
@@ -222,7 +223,7 @@ class RiskTile extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => SurveyScreen(risk: risk, start: done ? SurveyStart.summary : SurveyStart.intro),
+            builder: (_) => SurveyScreen(risk: risk, start: done || risk.isResolved ? SurveyStart.summary : SurveyStart.intro),
           )),
           child: IntrinsicHeight(
             child: Row(
@@ -250,7 +251,8 @@ class RiskTile extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (risk.isResolved) const Pill('Archive', icon: Icons.history_edu),
+                            if (risk.isResolved) const Pill('Closed', icon: Icons.history_edu),
+                            if (skipped) const Pill('Skipped', icon: Icons.snooze_outlined),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -265,7 +267,7 @@ class RiskTile extends StatelessWidget {
                           children: [
                             LevelBadge(risk.level),
                             const Spacer(),
-                            done
+                            done && !risk.isResolved
                                 ? Icon(Icons.check_circle, color: cs.primary, size: 22)
                                 : Text(trailing ?? '$n ${n == 1 ? 'question' : 'questions'} · 2 min',
                                     style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),

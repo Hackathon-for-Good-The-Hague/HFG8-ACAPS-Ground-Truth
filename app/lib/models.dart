@@ -324,6 +324,11 @@ class Comment {
 
   /// A moderator has looked at it (marking useful / used also counts).
   bool reviewed;
+
+  /// Moderator account behind each action (null = nobody, or before accounts).
+  String? reviewedBy;
+  String? usefulBy;
+  String? usedBy;
   final Set<String> agreeIds;
   final Set<String> disagreeIds;
 
@@ -336,6 +341,9 @@ class Comment {
     this.useful = false,
     this.usedInRiskId,
     this.reviewed = false,
+    this.reviewedBy,
+    this.usefulBy,
+    this.usedBy,
     Set<String>? agreeIds,
     Set<String>? disagreeIds,
   })  : agreeIds = agreeIds ?? {},
@@ -350,6 +358,9 @@ class Comment {
         'useful': useful,
         'used_in': usedInRiskId,
         'reviewed': reviewed,
+        if (reviewedBy != null) 'reviewed_by': reviewedBy,
+        if (usefulBy != null) 'useful_by': usefulBy,
+        if (usedBy != null) 'used_by': usedBy,
         'agree': agreeIds.toList(),
         'disagree': disagreeIds.toList(),
       };
@@ -365,6 +376,9 @@ class Comment {
         useful: m['useful'] == true,
         usedInRiskId: m['used_in'] as String?,
         reviewed: m['reviewed'] == true,
+        reviewedBy: m['reviewed_by'] as String?,
+        usefulBy: m['useful_by'] as String?,
+        usedBy: m['used_by'] as String?,
         agreeIds: {...((m['agree'] as List?) ?? const []).cast<String>()},
         disagreeIds: {...((m['disagree'] as List?) ?? const []).cast<String>()},
       );

@@ -119,7 +119,7 @@ class _ProfileTabState extends State<ProfileTab> {
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyAnswersScreen())),
               icon: const Icon(Icons.history),
-              label: const Text('My answers'),
+              label: const Text('My forecasts'),
             ),
 
             const SectionLabel('Anonymity level'),

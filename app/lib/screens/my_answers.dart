@@ -23,7 +23,7 @@ class _MyAnswersScreenState extends State<MyAnswersScreen> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('My answers')),
+      appBar: AppBar(title: const Text('My forecasts')),
       body: ListenableBuilder(
         listenable: appState,
         builder: (context, _) {
@@ -54,7 +54,7 @@ class _MyAnswersScreenState extends State<MyAnswersScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   child: Row(
                     children: [
-                      _Count('${responses.length}', 'answers'),
+                      _Count('${responses.length}', 'forecasts'),
                       _Count('${myComments.length}', 'comments'),
                       _Count('${myComments.where((c) => c.useful).length}', 'marked useful'),
                       _Count('${myComments.where((c) => c.usedInRiskId != null).length}', 'used in analysis'),
@@ -240,7 +240,8 @@ class _MyComment extends StatelessWidget {
               _Flag(
                 on: c.useful,
                 icon: Icons.lightbulb_outline,
-                onText: 'Marked useful by moderator · +${Points.usefulComment}',
+                // Experts never see which moderator did it: always "ACAPS".
+                onText: 'Marked useful by ACAPS · +${Points.usefulComment}',
                 offText: 'Not marked useful yet',
               ),
               _Flag(

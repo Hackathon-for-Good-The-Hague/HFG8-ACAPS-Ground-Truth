@@ -61,7 +61,7 @@ class GroundTruthApp extends StatelessWidget {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       child: appState.sessionModerator
-          ? const ModeratorShell(key: ValueKey('moderator'))
+          ? ModeratorShell(key: ValueKey('moderator-${appState.sessionModeratorId}'))
           : appState.me != null
               ? HomeShell(key: ValueKey('home-${appState.me!.id}'))
               : appState.invitePanel == null

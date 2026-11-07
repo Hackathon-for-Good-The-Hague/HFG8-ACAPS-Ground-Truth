@@ -26,26 +26,46 @@ void main() {
       await _start(tester, size);
       expect(find.text('Inbox'), findsWidgets);
 
-      // Invite sheet with a QR code, from an Inbox alert.
+      // Inbox badge counts new comments only.
+      expect(find.descendant(of: find.byType(Badge), matching: find.text('${appState.commentsToReview}')), findsWidgets);
+
+      // Invite from an Inbox country: its QR code straight away, no country picker.
       await tester.tap(find.text('Invite').first);
       await tester.pumpAndSettle();
       expect(find.text('Copy code'), findsOneWidget);
+      expect(find.textContaining('Invite experts to '), findsOneWidget);
+      expect(find.text('Pick a country to get its invite QR code.'), findsNothing);
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
 
-      for (final tab in ['Risks', 'Experts', 'Inbox']) {
+      for (final tab in ['Risks', 'Comments', 'Experts', 'Profile', 'Inbox']) {
         await tester.tap(find.text(tab).last);
         await tester.pumpAndSettle();
       }
 
-      // Invite from Experts without a country.
+      // Experts tab: no second QR button.
       await tester.tap(find.text('Experts').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Invite experts'));
+      expect(find.text('Invite experts'), findsNothing);
+
+      // Profile: this moderator's name and display settings.
+      await tester.tap(find.text('Profile').last);
       await tester.pumpAndSettle();
-      expect(find.text('Pick a country to get its invite QR code.'), findsOneWidget);
-      await tester.tapAt(const Offset(10, 10));
+      expect(find.text('Sarah Okafor'), findsOneWidget);
+      expect(find.text('Text size'), findsOneWidget);
+
+      // Comments tab: review actions for the risk with most new comments.
+      await tester.tap(find.text('Comments').last);
       await tester.pumpAndSettle();
+      if (size.width < 900) {
+        await tester.tap(find.textContaining('R1043 ·').first);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('Mark reviewed'), findsWidgets);
+      if (size.width < 900) {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
 
       // QR button in the app bar, on any tab.
       await tester.tap(find.byTooltip('Invite QR code for any country'));
@@ -68,6 +88,31 @@ void main() {
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
       if (size.width < 900) {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
+
+      // A trigger's comment chip on the Risks tab opens those comments.
+      await tester.tap(find.text('Risks').last);
+      await tester.pumpAndSettle();
+      if (size.width < 900) {
+        await tester.tap(find.textContaining('R1043').first);
+        await tester.pumpAndSettle();
+      }
+      final chip = find.textContaining('· open');
+      for (var i = 0; i < 30 && chip.evaluate().isEmpty; i++) {
+        await tester.drag(find.byType(Scrollable).last, const Offset(0, -250));
+        await tester.pumpAndSettle();
+      }
+      await tester.ensureVisible(chip.first);
+      await tester.pumpAndSettle();
+      await tester.tap(chip.first);
+      await tester.pumpAndSettle();
+      // Scrolled to that trigger's comments, with their per-comment actions.
+      expect(find.text('ACTIONS FOR THIS COMMENT ONLY'), findsWidgets);
+      if (size.width < 900) {
+        await tester.pageBack();
+        await tester.pumpAndSettle();
         await tester.pageBack();
         await tester.pumpAndSettle();
       }
@@ -97,6 +142,129 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.textContaining('Trigger 1 of'), findsOneWidget);
+  });
+
+  testWidgets('"Not now" hides the banner, says so, and can be undone', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.runAsync(() => appState.load());
+    await appState.resetDemo();
+    final p1 = appState.expertById('p1')!;
+    appState.signInAs(p1);
+    appState.autoOpened.add('p1|${appState.pendingNotification!.id}'); // skip the entry pop-up
+    tester.view.physicalSize = const Size(500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const GroundTruthApp());
+    await tester.pumpAndSettle();
+
+    final r = appState.pendingNotification!;
+    expect(find.text(r.title), findsOneWidget); // the banner names the risk
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(appState.pendingNotification, isNull);
+    expect(appState.isSkipped(r), isTrue);
+    expect(find.text('Skipped'), findsOneWidget); // tag on the risk card
+    expect(find.text('Undo'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(appState.isSkipped(r), isFalse);
+    expect(appState.pendingNotification?.id, r.id);
+
+    // The message closes by itself after 5 seconds.
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsNothing);
+  });
+
+  testWidgets('experts never see which moderator handled their comment', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.runAsync(() => appState.load());
+    await appState.resetDemo();
+    appState.signInAs(appState.expertById('p1')!); // p1's comment s5 was marked useful and used by Sarah Okafor
+    tester.view.physicalSize = const Size(500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const GroundTruthApp());
+    await tester.pumpAndSettle();
+    if (find.text('Not now').evaluate().isNotEmpty) {
+      await tester.tap(find.text('Not now').first);
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('Profile').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.history)); // Profile -> My forecasts
+    await tester.pumpAndSettle();
+    // Scroll through the whole list, checking each screenful for moderator names.
+    final flag = find.textContaining('Marked useful by ACAPS');
+    var seen = false;
+    for (var i = 0; i < 40; i++) {
+      seen |= flag.evaluate().isNotEmpty;
+      for (final m in moderators) {
+        expect(find.textContaining(m.name), findsNothing);
+        expect(find.textContaining(m.shortName), findsNothing);
+      }
+      await tester.drag(find.byType(Scrollable).last, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
+    expect(seen, isTrue);
+  });
+
+  test('closed risks are read-only and earn no points', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = AppState();
+    await s.load();
+    s.register(level: Anonymity.pseudonymous, realName: 'Test Person', pseudonym: 'Tester', homeCountry: 'Chad',
+        interests: {'Sudan'}, notifications: true, onRating: true);
+    final closed = s.archiveForMe().first;
+    final before = s.statsOf(s.me!).points;
+
+    // The archive has every closed risk, not only my countries; mine first.
+    expect(s.archiveForMe().length, s.risks.where((r) => r.isResolved).length);
+    expect(s.archiveForMe().any((r) => !s.relevantTo(s.me!, r)), isTrue);
+    expect(s.relevantTo(s.me!, closed), isTrue);
+
+    // Answered closed risks stay in the archive too.
+    s.signInAs(s.expertById('p2')!);
+    expect(s.archiveForMe(), isNotEmpty);
+    expect(s.archiveForMe().where((r) => s.responseOf(s.me!, r) != null), isNotEmpty);
+    s.signInAs(s.experts.last);
+    s.submit(closed, {for (final it in closed.surveyItems) it.id: const ItemAnswer(agree: Agreement.yes, likelihood: 5, severity: 3)});
+    expect(s.responseOf(s.me!, closed), isNull);
+    expect(s.statsOf(s.me!).points, before);
+  });
+
+  test('moderators have own accounts, signed actions and display settings', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = AppState();
+    await s.load();
+    s.signInModerator('m2');
+    expect(s.moderator?.name, 'Tomás Lindqvist');
+    s.setTheme(AppTheme.dark);
+    s.setTextScale(1.3);
+    final c = s.comments.firstWhere((c) => c.needsReview);
+    final before = s.commentsToReview;
+    s.toggleUseful(c);
+    expect(c.usefulBy, 'm2');
+    expect(c.reviewedBy, 'm2');
+    expect(s.commentsToReview, before - 1);
+    expect(s.activityOf(s.moderator!).useful, greaterThanOrEqualTo(1));
+
+    s.signInModerator('m3');
+    expect(s.theme, AppTheme.system);
+    expect(s.textScale, 1.0);
+
+    // Persisted: back to m2 after a restart.
+    final again = AppState();
+    await again.load();
+    expect(again.moderator?.id, 'm3');
+    again.signInModerator('m2');
+    expect(again.theme, AppTheme.dark);
+    expect(again.textScale, 1.3);
+    expect(again.comments.firstWhere((x) => x.id == c.id).usefulBy, 'm2');
   });
 
   test('saved risks persist, have no simulated answers, and can be deleted', () async {

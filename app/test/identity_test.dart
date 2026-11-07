@@ -83,7 +83,7 @@ void main() {
 
       s.submit(r, {
         for (final it in r.surveyItems)
-          it.id: ItemAnswer(agree: Agreement.partly, likelihood: 4, severity: 4, missing: it == r.surveyItems.first ? 'Watch Tiné' : ''),
+          it.id: ItemAnswer(agree: Agreement.partly, likelihood: 4, severity: 4, missing: it.id == r.surveyItems.first.id ? 'Watch Tiné' : ''),
       });
       expect(s.respondents(r).length, 6);
       expect(s.commentsOn(r).where((c) => c.authorId == 'p1').length, 1);

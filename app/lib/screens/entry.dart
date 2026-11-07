@@ -119,18 +119,25 @@ class SignInScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Card(
-                    child: ListTile(
-                      leading: CircleAvatar(backgroundColor: cs.tertiary.withAlpha(50), child: Icon(Icons.admin_panel_settings_outlined, color: cs.onSurface)),
-                      title: const Text('ACAPS moderator', style: TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: const Text('Panels, comments, rating, database view'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: appState.signInModerator,
+                const SectionLabel('ACAPS moderators'),
+                Text('Each moderator has their own account. Reviews are signed with their name.', style: t.bodySmall),
+                const SizedBox(height: 8),
+                for (final m in moderators)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: cs.tertiary.withAlpha(50),
+                          child: Icon(Icons.admin_panel_settings_outlined, color: cs.onSurface),
+                        ),
+                        title: Text(m.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: const Text('ACAPS moderator'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => appState.signInModerator(m.id),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),

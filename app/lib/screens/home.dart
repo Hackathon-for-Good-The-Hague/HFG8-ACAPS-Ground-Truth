@@ -30,6 +30,7 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _showRiskPopup(Risk r) async {
     final answered = appState.responseOf(appState.me!, r) != null;
+    final closed = r.isResolved;
     final n = r.surveyItems.length;
     final go = await showDialog<bool>(
       context: context,
@@ -37,7 +38,7 @@ class _HomeShellState extends State<HomeShell> {
         final t = Theme.of(context).textTheme;
         return AlertDialog(
           icon: const Icon(Icons.notifications_active_outlined),
-          title: Text('ACAPS updated a risk in ${AppState.riskCountries(r).join(', ')}'),
+          title: Text(closed ? 'This risk has closed' : 'ACAPS updated this risk'),
           content: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
             child: SingleChildScrollView(
@@ -46,12 +47,18 @@ class _HomeShellState extends State<HomeShell> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   RiskHeader(risk: r),
+                  if (r.title != r.oneLiner) ...[
+                    const SizedBox(height: 10),
+                    Text(r.title, style: t.titleSmall),
+                  ],
                   const SizedBox(height: 14),
                   Text(
-                    answered
-                        ? 'You already answered. See how colleagues see it now, or change your answer.'
-                        : 'Got 2 minutes? $n short ${n == 1 ? 'screen' : 'screens'}. '
-                            'You answer before you see the group, so your view stays independent.',
+                    closed
+                        ? 'See what happened and how the group saw it. Answers are no longer accepted.'
+                        : answered
+                            ? 'You already answered. See how colleagues see it now, or change your answer.'
+                            : 'Got 2 minutes? $n short ${n == 1 ? 'screen' : 'screens'}. '
+                                'You answer before you see the group, so your view stays independent.',
                     style: t.bodyMedium,
                   ),
                 ],
@@ -59,12 +66,12 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(closed ? 'Close' : 'Not now')),
             FilledButton(
               // The theme makes filled buttons full width; dialog actions need a finite size.
               style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
               onPressed: () => Navigator.pop(context, true),
-              child: Text(answered ? 'See group summary' : 'Start'),
+              child: Text(closed ? 'See what happened' : (answered ? 'See group summary' : 'Start')),
             ),
           ],
         );
@@ -73,10 +80,10 @@ class _HomeShellState extends State<HomeShell> {
     if (!mounted) return;
     if (go == true) {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => SurveyScreen(risk: r, start: answered ? SurveyStart.summary : SurveyStart.questions),
+        builder: (_) => SurveyScreen(risk: r, start: answered || closed ? SurveyStart.summary : SurveyStart.questions),
       ));
     } else if (go == false && !answered && r.isActive) {
-      appState.skip(r); // explicit "Not now", same as on the survey intro
+      notNow(context, r); // explicit "Not now", same as on the banner and the survey intro
     }
   }
 
@@ -108,8 +115,16 @@ class _HomeShellState extends State<HomeShell> {
 // Risks
 // ---------------------------------------------------------------------------
 
-class InboxTab extends StatelessWidget {
+class InboxTab extends StatefulWidget {
   const InboxTab({super.key});
+
+  @override
+  State<InboxTab> createState() => _InboxTabState();
+}
+
+class _InboxTabState extends State<InboxTab> {
+  bool _allArchive = false;
+  bool _archiveMineOnly = false;
 
   @override
   Widget build(BuildContext context) {
@@ -121,7 +136,10 @@ class InboxTab extends StatelessWidget {
         if (me == null) return const SizedBox();
         final note = appState.pendingNotification;
         final active = appState.activeForMe();
-        final practice = appState.practiceForMe();
+        final allClosed = appState.archiveForMe();
+        final mineClosed = allClosed.where((r) => appState.relevantTo(me, r)).toList();
+        final archive = _archiveMineOnly ? mineClosed : allClosed;
+        final shownArchive = _allArchive ? archive : archive.take(5);
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -129,13 +147,58 @@ class InboxTab extends StatelessWidget {
             Text('Hi, ${displayName(me, appState.viewer)}', style: t.headlineSmall),
             const SizedBox(height: 4),
             Text('Your countries: ${([me.homeCountry, ...me.interests]).join(', ')}', style: t.bodySmall),
-            if (note != null) ...[const SizedBox(height: 16), _Notification(risk: note)],
+            // Slides away after "Not now", so it is obvious the tap worked.
+            AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: note == null
+                    ? const SizedBox(width: double.infinity, key: ValueKey('no-banner'))
+                    : Padding(
+                        key: ValueKey(note.id),
+                        padding: const EdgeInsets.only(top: 16),
+                        child: _Notification(risk: note),
+                      ),
+              ),
+            ),
             SectionLabel('Active risks in your countries · ${active.length}'),
             if (active.isEmpty) Text('No active risks right now.', style: t.bodySmall),
             for (final r in active) RiskTile(risk: r),
-            if (practice.isNotEmpty) ...[
-              const SectionLabel('Archive · practise and see what happened'),
-              for (final r in practice.take(5)) RiskTile(risk: r, trailing: 'matures instantly'),
+            if (allClosed.isNotEmpty) ...[
+              SectionLabel('Archive · see what happened · ${allClosed.length}'),
+              Text('Every risk that has closed, including ones from before you joined. '
+                  'You can read the outcome and the group view, but not answer them.',
+                  style: t.bodySmall),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(value: false, label: Text('All countries · ${allClosed.length}')),
+                    ButtonSegment(value: true, label: Text('My countries · ${mineClosed.length}')),
+                  ],
+                  selected: {_archiveMineOnly},
+                  onSelectionChanged: (v) => setState(() => _archiveMineOnly = v.first),
+                ),
+              ),
+              const SizedBox(height: 4),
+              if (archive.isEmpty) Text('No closed risks in your countries yet.', style: t.bodySmall),
+              for (final r in shownArchive)
+                RiskTile(
+                  risk: r,
+                  trailing: appState.responseOf(me, r) == null ? 'See what happened' : 'Your forecast · see what happened',
+                ),
+              if (archive.length > 5)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => setState(() => _allArchive = !_allArchive),
+                    child: Text(_allArchive ? 'Show fewer' : 'Show all ${archive.length}'),
+                  ),
+                ),
             ],
           ],
         );
@@ -144,7 +207,7 @@ class InboxTab extends StatelessWidget {
   }
 }
 
-/// In-app version of the push notification.
+/// In-app version of the push notification: names the risk that changed.
 class _Notification extends StatelessWidget {
   final Risk risk;
   const _Notification({required this.risk});
@@ -154,9 +217,9 @@ class _Notification extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final n = risk.surveyItems.length;
-    final country = AppState.riskCountries(risk).first;
     return Reveal(
       child: Card(
+        margin: EdgeInsets.zero,
         color: cs.primary.withAlpha(22),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: cs.primary.withAlpha(120))),
         child: Padding(
@@ -168,16 +231,18 @@ class _Notification extends StatelessWidget {
                 children: [
                   Icon(Icons.notifications_active_outlined, color: cs.primary),
                   const SizedBox(width: 8),
-                  Text('ACAPS · now', style: t.labelMedium),
+                  Expanded(child: Text('ACAPS updated a risk · now', style: t.labelMedium)),
+                  Text('${risk.id} · ${risk.country}', style: t.labelSmall),
                 ],
               ),
               const SizedBox(height: 10),
-              Text('ACAPS updated a risk in $country. Got 2 minutes? $n short ${n == 1 ? 'question' : 'questions'}.',
-                  style: t.titleMedium),
+              Text(risk.title, maxLines: 4, overflow: TextOverflow.ellipsis, style: t.titleMedium),
+              const SizedBox(height: 6),
+              Text('Got 2 minutes? $n short ${n == 1 ? 'question' : 'questions'}.', style: t.bodyMedium),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  TextButton(onPressed: () => appState.skip(risk), child: const Text('Not now')),
+                  TextButton(onPressed: () => notNow(context, risk), child: const Text('Not now')),
                   const Spacer(),
                   FilledButton(
                     style: FilledButton.styleFrom(minimumSize: const Size(120, 44)),
@@ -237,7 +302,8 @@ class ForecastsTab extends StatelessWidget {
             for (final x in open) _ForecastCard(response: x),
             SectionLabel('Matured · ${matured.length}'),
             if (matured.isEmpty)
-              Text('A forecast matures when the 6-month window closes. Try an archive risk to see one now.', style: t.bodySmall),
+              Text('A forecast matures when its 6-month window closes and ACAPS records what happened. '
+                  'Then it is scored here.', style: t.bodySmall),
             for (final x in matured) _ForecastCard(response: x),
           ],
         );
